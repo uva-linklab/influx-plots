@@ -28,7 +28,7 @@ def get_longform_df(result_set, timezone="US/Eastern"):
 
 
 # Read in config parameters from a file passed as the first argument
-config = configparser.ConfigParser(allow_unnamed_section=True)
+config = configparser.ConfigParser()
 config_file_name = sys.argv[1]
 config.read(config_file_name)
 
@@ -43,9 +43,9 @@ matplotlib.use("Agg")
 # Initialize InfluxDB client
 class Influx:
     def __init__(self):
-        self.user = config.get(configparser.UNNAMED_SECTION, "INFLUXDB_USERNAME")
-        self.password = config.get(configparser.UNNAMED_SECTION, "INFLUXDB_PASSWORD")
-        self.host = config.get(configparser.UNNAMED_SECTION, "INFLUX_HOST")
+        self.user = config.get("influx", "INFLUXDB_USERNAME")
+        self.password = config.get("influx", "INFLUXDB_PASSWORD")
+        self.host = config.get("influx", "INFLUX_HOST")
         self.dbname = "gateway-generic"
         self.port = 443
         self.ssl = True
@@ -92,13 +92,11 @@ inf = Influx()
 
 
 # Flask route to get recent data and return it as an image
-@app.route("/get_recent_data_image", methods=["GET"])
+@app.route("/v1/plot/hour", methods=["GET"])
 def get_recent_data_image():
     try:
         # Get device_id and fieldname from query parameters
-        device_id = flask.request.args.get(
-            "device_id", default="your_default_device_id"
-        )
+        device_id = flask.request.args.get("device_id", default="1")
         # Default field name is co2_ppm
         fieldname = flask.request.args.get("fieldname", default="co2_ppm")
 
@@ -118,19 +116,34 @@ def get_recent_data_image():
             return jsonify({"error": "No data found for the device."}), 404
 
         # Generate the plot using matplotlib
-        matplotlib.pyplot.figure(figsize=(10, 6))
-        matplotlib.pyplot.plot(df["time"], df["value"], label=fieldname, color="blue")
+        fig = matplotlib.pyplot.figure(figsize=(10, 6))
+        ax = fig.add_subplot(111)
+        ax.plot(df["time"], df["value"], label=fieldname, color="blue")
 
         # Add labels and title
-        matplotlib.pyplot.xlabel("Time")
-        matplotlib.pyplot.ylabel("Value")
-        matplotlib.pyplot.title(f"{fieldname} data for device {device_id}")
-        matplotlib.pyplot.legend()
+        ax.set_xlabel("Time")
+        ax.xaxis.set_major_formatter(
+            matplotlib.dates.DateFormatter("%I:%M %p", tz="US/Eastern")
+        )
+        ax.set_ylabel(fieldname)
+        ax.set_title(f"{fieldname} data for device {device_id}")
+
+        # Clean up the look
+        #
+        # No unneeded border
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        # Vertical grid lines
+        ax.xaxis.grid()
+        # No annoying spacing from y axis
+        ax.set_xlim(xmin=df["time"][0])
 
         # Save plot to a BytesIO object
         img = io.BytesIO()
-        matplotlib.pyplot.savefig(img, format="png")
-        matplotlib.pyplot.close()
+        # Remove extra padding
+        fig.tight_layout()
+        fig.savefig(img, format="png")
+        # fig.close()
         img.seek(0)
 
         # Return the image as a response
